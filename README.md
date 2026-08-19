@@ -1,4 +1,4 @@
-#  Splunk BOTSv2 DFIR Investigation: Comprehensive Web Exploitation & Enterprise-Wide Fileless Malware Analysis
+#  Splunk BOTSv2 DFIR Investigation: Comprehensive Web Exploitation & Enterprise Wide Fileless Malware Analysis
 
 ##  Executive Summary
 During an advanced Digital Forensics and Incident Response (DFIR) investigation into the **Splunk BOTSv2 (Boss of the SOC v2)** dataset, two interconnected attack campaigns targeting **Frothly** (`brewertalk.com` & internal corporate Active Directory infrastructure) were identified and reconstructed.
